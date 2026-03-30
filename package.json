@@ -15,7 +15,7 @@
 		"dev:rollup": "rollup -c rollup.config.ts --configPlugin typescript -w --no-watch.clearScreen",
 		"lint": "eslint --ext .js,.ts src/**",
 		"postinstall": "node scripts/install",
-		"prepare": "yarn build",
+		"prepare": "npm run build",
 		"test": "echo \"No tests yet\""
 	},
 	"repository": {
