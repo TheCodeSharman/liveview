@@ -112,6 +112,12 @@ export const config = (logger: any, config: any, cli: any) => {
 };
 
 export const validate = (logger: any, config: any, cli: any) => {
+	// The titanium CLI's initBuildPlatform() only runs for the 'build' command,
+	// so platform-specific options like --target are not registered for 'serve'.
+	// Default it here so iOS/Android builders don't crash in selectDevice.
+	if (!cli.argv.target) {
+		cli.argv.target = cli.argv.platform === 'android' ? 'emulator' : 'simulator';
+	}
 	return buildCommand.validate(logger, config, cli);
 };
 
