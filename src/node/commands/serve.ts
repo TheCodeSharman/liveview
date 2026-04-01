@@ -234,6 +234,14 @@ export const run = async (
 		const skipLaunch = cli.argv['skip-launch'];
 		if (force) {
 			logger.info(`${chalk.green('[LiveView]')} Forcing app rebuild ...`);
+			// Clean the platform's Xcode/Gradle derived data so stale artifacts
+			// from a previous build (e.g. simulator → device switch) don't cause
+			// link failures. Only wipe the compiler output, not the whole build dir.
+			const platformBuildDir = path.join(projectDir, 'build', legacyPlatformName, 'build');
+			if (fs.existsSync(platformBuildDir)) {
+				logger.info(`${chalk.green('[LiveView]')} Cleaning stale build artifacts ...`);
+				await fs.remove(platformBuildDir);
+			}
 			cli.argv.liveview = true;
 			await runBuild(logger, config, cli);
 			await fs.outputJSON(dataPath, data);
