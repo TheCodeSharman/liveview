@@ -61,6 +61,10 @@ export function requireAnalysisPlugin(): Plugin {
 		},
 
 		async transform(source, importer) {
+			// Pre-bundled UMD/CJS test libraries — skip require analysis entirely
+			if (importer.includes('/spec/lib/')) {
+				return;
+			}
 			const rewriteStart = Date.now();
 
 			let requires;

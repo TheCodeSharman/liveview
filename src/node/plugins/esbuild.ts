@@ -8,7 +8,7 @@ import { cleanUrl } from '../utils';
 const clientDir = normalizePath(CLIENT_DIR);
 
 export function esbuildPlugin(): Plugin {
-	const filter = createFilter([/\.(m?j|t)sx?/], 'node_modules/!(alloy)');
+	const filter = createFilter([/\.(m?j|t)sx?/], ['node_modules/!(alloy)', '**/spec/lib/**']);
 
 	return {
 		name: 'titanium:esbuild',

@@ -81,7 +81,12 @@ export async function runDynamicOptimize(
 	for (const id in knownOptimized) {
 		newDeps[id] = knownOptimized[id].src;
 	}
-	const meta = await optimizeDeps(server.config, true, false);
+	let meta;
+	try {
+		meta = await optimizeDeps(server.config, true, false);
+	} catch (e: any) {
+		logger.warn(`[LiveView] Failed to pre-bundle dynamic dependencies: ${e.message}`);
+	}
 	if (meta) {
 		// In-place update of known optimized deps so the `_registerMissingImport`
 		// function on the server knows about our newly discovered dynamic deps.
