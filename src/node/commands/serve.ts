@@ -130,8 +130,12 @@ export const validate = (logger: any, config: any, cli: any) => {
 	// The titanium CLI's initBuildPlatform() only runs for the 'build' command,
 	// so platform-specific options like --target and -C/--device-id are not registered
 	// for 'serve'. Default/propagate them here so the platform builders behave correctly.
+	// Propagate --target from process.argv since it isn't registered for 'serve'.
 	if (!cli.argv.target) {
-		cli.argv.target = cli.argv.platform === 'android' ? 'emulator' : 'simulator';
+		const targetIdx = process.argv.indexOf('--target');
+		cli.argv.target = targetIdx !== -1 && process.argv[targetIdx + 1]
+			? process.argv[targetIdx + 1]
+			: cli.argv.platform === 'android' ? 'emulator' : 'simulator';
 	}
 	// Propagate -C / --device-id from process.argv since it isn't registered for 'serve'.
 	if (!cli.argv['device-id']) {
