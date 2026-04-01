@@ -145,6 +145,21 @@ export const validate = (logger: any, config: any, cli: any) => {
 			cli.argv['device-id'] = argv[idx + 1];
 		}
 	}
+	// Propagate -P / --pp-uuid and -R / --developer-name from process.argv.
+	if (!cli.argv['pp-uuid']) {
+		const argv = process.argv;
+		const idx = argv.indexOf('-P') !== -1 ? argv.indexOf('-P') : argv.indexOf('--pp-uuid');
+		if (idx !== -1 && argv[idx + 1]) {
+			cli.argv['pp-uuid'] = argv[idx + 1];
+		}
+	}
+	if (!cli.argv['developer-name']) {
+		const argv = process.argv;
+		const idx = argv.indexOf('-R') !== -1 ? argv.indexOf('-R') : argv.indexOf('--developer-name');
+		if (idx !== -1 && argv[idx + 1]) {
+			cli.argv['developer-name'] = argv[idx + 1];
+		}
+	}
 	return buildCommand.validate(logger, config, cli);
 };
 
