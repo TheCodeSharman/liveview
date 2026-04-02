@@ -85,8 +85,8 @@ export function init(logger: any, config: any, cli: any): void {
 			const templateFile = path.resolve(__dirname, '../liveview.bootstrap.js');
 			let bootstrapContent = await fs.readFile(templateFile, 'utf-8');
 			bootstrapContent = bootstrapContent
-				.replace('__SERVER_HOSTNAME__', JSON.stringify(host))
-				.replace('__SERVER_PORT__', JSON.stringify(port));
+				.replaceAll('__SERVER_HOSTNAME__', JSON.stringify(host))
+				.replaceAll('__SERVER_PORT__', JSON.stringify(port));
 			const bootstrapPath = path.join(liveviewDir, 'Resources', BOOSTRAP_FILE);
 			await fs.outputFile(bootstrapPath, bootstrapContent);
 

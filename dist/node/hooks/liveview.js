@@ -72,8 +72,8 @@ function init(logger, config, cli) {
             const templateFile = path_1.default.resolve(__dirname, '../liveview.bootstrap.js');
             let bootstrapContent = await fs_extra_1.default.readFile(templateFile, 'utf-8');
             bootstrapContent = bootstrapContent
-                .replace('__SERVER_HOSTNAME__', JSON.stringify(host))
-                .replace('__SERVER_PORT__', JSON.stringify(port));
+                .replaceAll('__SERVER_HOSTNAME__', JSON.stringify(host))
+                .replaceAll('__SERVER_PORT__', JSON.stringify(port));
             const bootstrapPath = path_1.default.join(liveviewDir, 'Resources', BOOSTRAP_FILE);
             await fs_extra_1.default.outputFile(bootstrapPath, bootstrapContent);
             // prevent deletion of LiveView cache folder under build/<platform>/.liveview
