@@ -112,12 +112,12 @@ export function init(logger: any, config: any, cli: any): void {
 				// Dropping it into Classes/ means Xcode compiles it into the app.
 				const nativeSrc = path.resolve(__dirname, '../native/LiveViewFetch.m');
 				if (fs.existsSync(nativeSrc)) {
-					const classesDest = path.join(
-						builder.buildDir,
-						'Classes',
-						'LiveViewFetch.m'
+					const classesDir = path.join(builder.buildDir, 'Classes');
+					fs.ensureDirSync(classesDir);
+					await fs.copyFile(
+						nativeSrc,
+						path.join(classesDir, 'LiveViewFetch.m')
 					);
-					await fs.copyFile(nativeSrc, classesDest);
 				}
 				// The user might add new Ti APIs while developing with LiveView so let's
 				// just preemptively include all Ti module
