@@ -13,21 +13,12 @@ var src = {exports: {}};
 
 var node = {exports: {}};
 
-var hasFlag$1;
-var hasRequiredHasFlag;
-
-function requireHasFlag () {
-	if (hasRequiredHasFlag) return hasFlag$1;
-	hasRequiredHasFlag = 1;
-
-	hasFlag$1 = (flag, argv = process.argv) => {
-		const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
-		const position = argv.indexOf(prefix + flag);
-		const terminatorPosition = argv.indexOf('--');
-		return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-	};
-	return hasFlag$1;
-}
+var hasFlag$1 = (flag, argv = process.argv) => {
+	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf('--');
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+};
 
 var supportsColor_1$1;
 var hasRequiredSupportsColor;
@@ -37,7 +28,7 @@ function requireSupportsColor () {
 	hasRequiredSupportsColor = 1;
 	const os = require$$0;
 	const tty = require$$1;
-	const hasFlag = requireHasFlag();
+	const hasFlag = hasFlag$1;
 
 	const {env} = process;
 
@@ -2574,7 +2565,7 @@ var ansiStylesExports = ansiStyles$1.exports;
 
 const os = require$$0;
 const tty = require$$1;
-const hasFlag = requireHasFlag();
+const hasFlag = hasFlag$1;
 
 const {env} = process;
 
