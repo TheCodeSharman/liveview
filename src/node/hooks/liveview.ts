@@ -108,6 +108,17 @@ export function init(logger: any, config: any, cli: any): void {
 					bootstrapPath,
 					path.join(projectDir, 'Resources', BOOSTRAP_FILE)
 				);
+				// Copy native helper that provides run-loop-aware sync HTTP fetch.
+				// Dropping it into Classes/ means Xcode compiles it into the app.
+				const nativeSrc = path.resolve(__dirname, '../native/LiveViewFetch.m');
+				if (fs.existsSync(nativeSrc)) {
+					const classesDest = path.join(
+						builder.buildDir,
+						'Classes',
+						'LiveViewFetch.m'
+					);
+					await fs.copyFile(nativeSrc, classesDest);
+				}
 				// The user might add new Ti APIs while developing with LiveView so let's
 				// just preemptively include all Ti module
 				builder.includeAllTiModules = true;

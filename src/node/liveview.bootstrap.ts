@@ -27,7 +27,27 @@ export function execute(done: () => void): void {
 	const { injectQuery } = require(CLIENT_PUBLIC_PATH);
 	__vite__injectQuery = injectQuery;
 
+	// Prefetch all module sources in a single request so that subsequent
+	// require() calls serve from the in-memory cache instead of doing
+	// individual sync HTTP fetches that block the main thread.
+	prefetchAll();
+
 	done();
+}
+
+// On iOS, use a native helper that pumps the CFRunLoop while waiting for
+// the HTTP response.  Ti.Network.HTTPClient's sync mode uses
+// dispatch_semaphore_wait which blocks the run loop entirely, causing the
+// scene-update watchdog (0x8BADF00D) to kill the app after 10 seconds.
+// The native helper uses NSRunLoop runMode:beforeDate: instead.
+let liveViewFetch: any;
+try {
+	if (Ti.Platform.osname !== 'android') {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires, n/no-missing-require
+		liveViewFetch = new (require('LiveViewFetch'))();
+	}
+} catch (_e) {
+	// Native helper not available — fall back to Ti.Network.HTTPClient
 }
 
 const fetchRemote = (filename: string) => {
@@ -39,8 +59,19 @@ const fetchRemote = (filename: string) => {
 	}
 
 	const url = `http://${__SERVER_HOSTNAME__}:${__SERVER_PORT__}${filename}`;
-	const request = Ti.Network.createHTTPClient();
 	debug('Fetch remote %s', chalk.cyan(filename));
+
+	// iOS: use native run-loop-aware fetch to avoid watchdog kills
+	if (liveViewFetch) {
+		const result = liveViewFetch.fetch(url);
+		if (!result) {
+			debug(`Failed to load "${chalk.cyan(url)}"`);
+		}
+		return result;
+	}
+
+	// Android / fallback: use Ti.Network.HTTPClient
+	const request = Ti.Network.createHTTPClient();
 	request.cache = true;
 	request.open('GET', url, false);
 	request.send();
@@ -76,6 +107,49 @@ const fetchRemote = (filename: string) => {
 
 	return request.responseText;
 };
+
+// Source cache populated by prefetchAll() — maps module id to source text.
+// When populated, liveViewRequire serves from this map instead of calling
+// fetchRemote, avoiding the sync HTTP call that blocks the main thread and
+// triggers the iOS scene-update watchdog.
+const sourceCache: Record<string, string> = {};
+let prefetchDone = false;
+
+/**
+ * Fetch a JSON manifest of all transformed module sources from the dev
+ * server in a single request and populate sourceCache.  The server must
+ * expose a /@liveview/prefetch endpoint that returns { [id]: source }.
+ */
+function prefetchAll() {
+	if (prefetchDone) {
+		return;
+	}
+	const url = `http://${__SERVER_HOSTNAME__}:${__SERVER_PORT__}/@liveview/prefetch`;
+	const request = Ti.Network.createHTTPClient();
+	debug('Prefetching all modules from %s', chalk.cyan(url));
+	request.cache = false;
+	request.open('GET', url, false);
+	request.send();
+	if (request.status === 200) {
+		try {
+			const manifest = JSON.parse(request.responseText);
+			let count = 0;
+			for (const [id, source] of Object.entries(manifest)) {
+				sourceCache[id] = source as string;
+				count++;
+			}
+			debug('Prefetched %d modules', count);
+		} catch (e) {
+			debug('Failed to parse prefetch manifest: %s', e);
+		}
+	} else {
+		debug(
+			'Prefetch endpoint returned %d, falling back to per-request fetch',
+			request.status
+		);
+	}
+	prefetchDone = true;
+}
 
 function patchRequire() {
 	const Module = (global as any).Module;
@@ -133,13 +207,21 @@ function patchRequire() {
 
 		if (filename && !exclude(filename, request)) {
 			const id = cleanUrl(filename);
-			// First check the cache if this was alrady loaded
+			// First check the cache if this was already loaded
 			if (Module.cache[id]) {
 				return Module.cache[id].exports;
 			}
 
-			// Fetch from remote dev server
-			const source = fetchRemote(filename);
+			// Try the prefetch source cache first, then fall back to fetchRemote
+			let source: string | undefined;
+			if (sourceCache[id]) {
+				source = sourceCache[id];
+			} else if (sourceCache[filename]) {
+				source = sourceCache[filename];
+			} else {
+				source = fetchRemote(filename);
+			}
+
 			if (source) {
 				const module = new Module(filename, this);
 				let wrapped = source;
