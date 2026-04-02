@@ -55,10 +55,4 @@ async function install() {
 	await addPath('commands');
 }
 
-install()
-	.catch((e) => {
-		console.error('LiveView install script failed:', e.message);
-	})
-	.finally(() => {
-		process.exit(0);
-	});
+install();
