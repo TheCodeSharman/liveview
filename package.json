@@ -6,7 +6,8 @@
 	"types": "./dist/node/index.d.ts",
 	"license": "Apache-2.0",
 	"scripts": {
-		"build": "npm-run-all clean -p build:*",
+		"build": "npm-run-all clean -p build:* && npm run copy:native",
+		"copy:native": "node -e \"var fs=require('fs');fs.mkdirSync('dist/node/native',{recursive:true});fs.cpSync('src/node/native','dist/node/native',{recursive:true})\"",
 		"build:bundle": "rollup -c rollup.config.ts --configPlugin typescript",
 		"build:tsc": "tsc -p tsconfig.build.json",
 		"clean": "rimraf dist",
