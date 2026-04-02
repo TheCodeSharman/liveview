@@ -10,37 +10,55 @@
  * This allows UIKit to process scene-update callbacks and prevents the
  * iOS watchdog (0x8BADF00D) from killing the app.
  *
+ * To avoid firing Kroll JS timers during the pump, we set the request's
+ * runModes to a private mode and pump only that mode.  The HTTP response
+ * callback is delivered in our private mode (so the request completes),
+ * while Kroll timers (scheduled in NSDefaultRunLoopMode) are not fired.
+ *
+ * We also add our private mode to NSRunLoopCommonModes so that the
+ * scene-update watchdog source (which monitors common modes) is
+ * satisfied.
+ *
  * Compiled into the app by the liveview build hook. The +load method
  * runs automatically before main().
  */
 
 static IMP sOriginalSendIMP;
+static NSString *const kLiveViewRunLoopMode = @"com.liveview.httpwait";
+static BOOL sRunLoopModeRegistered = NO;
 
 static void LiveViewPatchedSend(APSHTTPRequest *self, SEL _cmd)
 {
     if (!self.synchronous) {
-        // Async request — use original implementation unchanged
         ((void (*)(id, SEL))sOriginalSendIMP)(self, _cmd);
         return;
     }
 
-    // Synchronous request: temporarily make it async, call original send
-    // (which starts the request without blocking), then pump the run loop
-    // until the request completes.
+    // Register our private mode as a common mode (once) so that
+    // scene-update sources are delivered when we pump it.
+    if (!sRunLoopModeRegistered) {
+        CFRunLoopAddCommonMode(CFRunLoopGetMain(), (__bridge CFStringRef)kLiveViewRunLoopMode);
+        sRunLoopModeRegistered = YES;
+    }
+
+    // Make async and set run modes so the response callback is
+    // delivered in our private mode, not the default mode.
     self.synchronous = NO;
+    self.runModes = @[kLiveViewRunLoopMode];
     ((void (*)(id, SEL))sOriginalSendIMP)(self, _cmd);
 
-    // Pump the run loop until the response is done
-    NSDate *timeoutDate = [NSDate dateWithTimeIntervalSinceNow:30.0];
+    // Pump our private mode until the response arrives.
+    // Kroll timers are in NSDefaultRunLoopMode so they won't fire.
+    // Scene-update sources are in common modes (which includes our
+    // private mode) so the watchdog stays happy.
+    NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + 30.0;
     while (self.response.readyState != APSHTTPResponseStateDone) {
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-        if ([timeoutDate timeIntervalSinceNow] <= 0) {
+        CFRunLoopRunInMode((__bridge CFStringRef)kLiveViewRunLoopMode, 0.01, false);
+        if ([NSDate timeIntervalSinceReferenceDate] > deadline) {
             break;
         }
     }
 
-    // Restore synchronous flag
     self.synchronous = YES;
 }
 
@@ -53,14 +71,13 @@ static void LiveViewPatchedSend(APSHTTPRequest *self, SEL _cmd)
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        Method originalMethod = class_getInstanceMethod(
+        Method sendMethod = class_getInstanceMethod(
             [APSHTTPRequest class], @selector(send)
         );
-        if (!originalMethod) {
-            return;
+        if (sendMethod) {
+            sOriginalSendIMP = method_getImplementation(sendMethod);
+            method_setImplementation(sendMethod, (IMP)LiveViewPatchedSend);
         }
-        sOriginalSendIMP = method_getImplementation(originalMethod);
-        method_setImplementation(originalMethod, (IMP)LiveViewPatchedSend);
     });
 }
 
