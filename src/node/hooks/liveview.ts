@@ -17,8 +17,17 @@ export const id = 'liveview-v2';
 export function init(logger: any, config: any, cli: any): void {
 	let serverOptions: LiveViewOpions;
 	let usePreview = false;
+	let nativeHelperCopied = false;
+
+	const log = (msg: string) =>
+		logger.info(`${chalk.green('[LiveView]')} ${msg}`);
+	const dbg = (msg: string) =>
+		logger.debug(`${chalk.green('[LiveView]')} ${msg}`);
+
+	dbg('init() called — registering hooks');
 
 	cli.on('build.config', (data: any) => {
+		dbg('build.config hook fired');
 		const config = data.result[1];
 		const flags = config.flags || (config.flags = {});
 		flags.liveview = {
@@ -38,9 +47,49 @@ export function init(logger: any, config: any, cli: any): void {
 		};
 	});
 
+	// Add native run-loop swizzle to the Xcode project's compile sources.
+	dbg('Registering build.ios.xcodeproject pre hook');
+	cli.on('build.ios.xcodeproject', {
+		pre: function (data: any, callback: DoneCallback) {
+			dbg('build.ios.xcodeproject pre hook fired');
+			dbg(`  nativeHelperCopied=${nativeHelperCopied}`);
+			if (!nativeHelperCopied) {
+				dbg('  Skipping — native helper not copied yet');
+				return callback();
+			}
+			const xcodeProject = data.args[0];
+			dbg(`  xcodeProject.filepath=${xcodeProject?.filepath}`);
+			log('Adding LiveViewFetch.m to Xcode project');
+			try {
+				// Create a file reference manually to avoid addPluginFile's
+				// reliance on a 'Plugins' PBXGroup (which doesn't exist).
+				const pbxFile = xcodeProject.addFile(
+					'Classes/LiveViewFetch.m',
+					xcodeProject.getFirstProject().firstProject.mainGroup,
+					{ sourceTree: 'SOURCE_ROOT' }
+				);
+				if (pbxFile) {
+					pbxFile.uuid = xcodeProject.generateUuid();
+					xcodeProject.addToPbxBuildFileSection(pbxFile);
+					xcodeProject.addToPbxSourcesBuildPhase(pbxFile);
+					dbg('  Added to compile sources');
+				} else {
+					dbg('  addFile returned null (already exists?)');
+				}
+			} catch (e) {
+				logger.warn(
+					`${chalk.green('[LiveView]')} Failed to add LiveViewFetch.m: ${e}`
+				);
+			}
+			callback();
+		}
+	});
+
 	cli.on('build.pre.compile', {
 		priority: 1100,
 		post: async (builder: any, done: DoneCallback) => {
+			dbg('build.pre.compile post hook fired');
+			dbg(`  cli.argv.liveview=${cli.argv.liveview}`);
 			if (!cli.argv.liveview) {
 				return done();
 			}
@@ -108,17 +157,21 @@ export function init(logger: any, config: any, cli: any): void {
 					bootstrapPath,
 					path.join(projectDir, 'Resources', BOOSTRAP_FILE)
 				);
-				// Copy native helper that provides run-loop-aware sync HTTP fetch.
-				// Dropping it into Classes/ means Xcode compiles it into the app.
+				// Copy native helper that swizzles [APSHTTPRequest send] to
+				// pump the run loop instead of blocking with a semaphore,
+				// preventing the iOS scene-update watchdog (0x8BADF00D).
 				const nativeSrc = path.resolve(__dirname, '../native/LiveViewFetch.m');
+				dbg(`Native helper source: ${nativeSrc}`);
+				dbg(`  exists: ${fs.existsSync(nativeSrc)}`);
 				if (fs.existsSync(nativeSrc)) {
 					const classesDir = path.join(builder.buildDir, 'Classes');
 					fs.ensureDirSync(classesDir);
-					await fs.copyFile(
-						nativeSrc,
-						path.join(classesDir, 'LiveViewFetch.m')
-					);
+					const dest = path.join(classesDir, 'LiveViewFetch.m');
+					await fs.copyFile(nativeSrc, dest);
+					nativeHelperCopied = true;
+					dbg(`Copied native helper to ${dest}`);
 				}
+
 				// The user might add new Ti APIs while developing with LiveView so let's
 				// just preemptively include all Ti module
 				builder.includeAllTiModules = true;
@@ -129,8 +182,9 @@ export function init(logger: any, config: any, cli: any): void {
 	});
 
 	cli.on('build.pre.build', async (builder: any, done: DoneCallback) => {
+		dbg('build.pre.build hook fired');
 		if (usePreview) {
-			logger.info(`${chalk.green('[LiveView]')} Starting dev server ...`);
+			log('Starting dev server ...');
 			await startServer(serverOptions);
 		}
 

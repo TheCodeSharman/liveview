@@ -1,61 +1,67 @@
 #import <Foundation/Foundation.h>
-#import <TitaniumKit/ObjcProxy.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+#import <TitaniumKit/APSHTTPRequest.h>
+#import <TitaniumKit/APSHTTPResponse.h>
 
 /**
- * Provides a synchronous HTTP GET that pumps the CFRunLoop while waiting
- * for the response.  Unlike Ti.Network.HTTPClient's sync mode (which uses
- * dispatch_semaphore_wait and blocks the run loop entirely), this
- * implementation uses NSRunLoop runMode:beforeDate: so that UIKit scene-
- * update callbacks are still serviced.  This prevents the iOS watchdog
- * (0x8BADF00D) from killing the app during LiveView module loading.
+ * Swizzles -[APSHTTPRequest send] so that synchronous requests pump the
+ * NSRunLoop while waiting, instead of using dispatch_semaphore_wait.
+ * This allows UIKit to process scene-update callbacks and prevents the
+ * iOS watchdog (0x8BADF00D) from killing the app.
  *
- * Exposed to JavaScript as:
- *   var LiveViewFetch = require('LiveViewFetch');
- *   var text = LiveViewFetch.fetch('http://...');
+ * Compiled into the app by the liveview build hook. The +load method
+ * runs automatically before main().
  */
-@interface LiveViewFetch : ObjcProxy
+
+static IMP sOriginalSendIMP;
+
+static void LiveViewPatchedSend(APSHTTPRequest *self, SEL _cmd)
+{
+    if (!self.synchronous) {
+        // Async request — use original implementation unchanged
+        ((void (*)(id, SEL))sOriginalSendIMP)(self, _cmd);
+        return;
+    }
+
+    // Synchronous request: temporarily make it async, call original send
+    // (which starts the request without blocking), then pump the run loop
+    // until the request completes.
+    self.synchronous = NO;
+    ((void (*)(id, SEL))sOriginalSendIMP)(self, _cmd);
+
+    // Pump the run loop until the response is done
+    NSDate *timeoutDate = [NSDate dateWithTimeIntervalSinceNow:30.0];
+    while (self.response.readyState != APSHTTPResponseStateDone) {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        if ([timeoutDate timeIntervalSinceNow] <= 0) {
+            break;
+        }
+    }
+
+    // Restore synchronous flag
+    self.synchronous = YES;
+}
+
+@interface LiveViewHTTPSwizzle : NSObject
 @end
 
-@implementation LiveViewFetch
+@implementation LiveViewHTTPSwizzle
 
-- (NSString *)fetch:(NSString *)urlString
++ (void)load
 {
-    NSURL *url = [NSURL URLWithString:urlString];
-    if (!url) {
-        return nil;
-    }
-
-    __block NSData *responseData = nil;
-    __block BOOL finished = NO;
-
-    NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.timeoutIntervalForRequest = 10;
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
-
-    NSURLSessionDataTask *task = [session dataTaskWithURL:url
-        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (!error && data) {
-                responseData = data;
-            }
-            finished = YES;
-        }];
-    [task resume];
-
-    // Pump the run loop while waiting — this services scene-update
-    // callbacks and prevents the watchdog from killing us.
-    NSDate *loopUntil;
-    while (!finished) {
-        loopUntil = [NSDate dateWithTimeIntervalSinceNow:0.05];
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:loopUntil];
-    }
-
-    [session invalidateAndCancel];
-
-    if (!responseData) {
-        return nil;
-    }
-
-    return [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Method originalMethod = class_getInstanceMethod(
+            [APSHTTPRequest class], @selector(send)
+        );
+        if (!originalMethod) {
+            return;
+        }
+        sOriginalSendIMP = method_getImplementation(originalMethod);
+        method_setImplementation(originalMethod, (IMP)LiveViewPatchedSend);
+    });
 }
 
 @end
