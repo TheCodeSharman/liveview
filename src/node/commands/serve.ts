@@ -31,15 +31,21 @@ let buildCommand: any;
 export const config = (logger: any, config: any, cli: any) => {
 	const platform = cli.argv._[1];
 	// Register before buildCommand.config() so this fires before the Android builder's
-	// cli:pre-validate handler reads cli.argv['build-only']. When --skip-launch is set
+	// cli:pre-validate handler reads cli.argv['build-only']. When --build-only is set
 	// for Android, force build-only so the SDK skips device enumeration during validation
 	// (platform-specific options like -C/device-id are not registered for 'serve').
-	cli.on('cli:pre-validate', (obj: any, callback: (err: null, obj: any) => void) => {
-		if (process.argv.includes('--skip-launch') && cli.argv.platform === 'android') {
-			cli.argv['build-only'] = true;
+	cli.on(
+		'cli:pre-validate',
+		(obj: any, callback: (err: null, obj: any) => void) => {
+			if (
+				process.argv.includes('--build-only') &&
+				cli.argv.platform === 'android'
+			) {
+				cli.argv['build-only'] = true;
+			}
+			callback(null, obj);
 		}
-		callback(null, obj);
-	});
+	);
 	buildCommand = require(path.join(
 		cli.sdk.path,
 		'cli',
@@ -113,13 +119,7 @@ export const config = (logger: any, config: any, cli: any) => {
 			});
 
 			// Remove unsupported flags
-			delete mergedConfig.flags['build-only'];
 			delete mergedConfig.flags.legacy;
-			// Add skip-launch flag
-			mergedConfig.flags['skip-launch'] = {
-				default: false,
-				desc: 'Start the LiveView server and build the app but do not install or launch it'
-			};
 
 			done(mergedConfig);
 		});
@@ -133,14 +133,20 @@ export const validate = (logger: any, config: any, cli: any) => {
 	// Propagate --target from process.argv since it isn't registered for 'serve'.
 	if (!cli.argv.target) {
 		const targetIdx = process.argv.indexOf('--target');
-		cli.argv.target = targetIdx !== -1 && process.argv[targetIdx + 1]
-			? process.argv[targetIdx + 1]
-			: cli.argv.platform === 'android' ? 'emulator' : 'simulator';
+		cli.argv.target =
+			targetIdx !== -1 && process.argv[targetIdx + 1]
+				? process.argv[targetIdx + 1]
+				: cli.argv.platform === 'android'
+				? 'emulator'
+				: 'simulator';
 	}
 	// Propagate -C / --device-id from process.argv since it isn't registered for 'serve'.
 	if (!cli.argv['device-id']) {
 		const argv = process.argv;
-		const idx = argv.indexOf('-C') !== -1 ? argv.indexOf('-C') : argv.indexOf('--device-id');
+		const idx =
+			argv.indexOf('-C') !== -1
+				? argv.indexOf('-C')
+				: argv.indexOf('--device-id');
 		if (idx !== -1 && argv[idx + 1]) {
 			cli.argv['device-id'] = argv[idx + 1];
 		}
@@ -148,14 +154,20 @@ export const validate = (logger: any, config: any, cli: any) => {
 	// Propagate -P / --pp-uuid and -R / --developer-name from process.argv.
 	if (!cli.argv['pp-uuid']) {
 		const argv = process.argv;
-		const idx = argv.indexOf('-P') !== -1 ? argv.indexOf('-P') : argv.indexOf('--pp-uuid');
+		const idx =
+			argv.indexOf('-P') !== -1
+				? argv.indexOf('-P')
+				: argv.indexOf('--pp-uuid');
 		if (idx !== -1 && argv[idx + 1]) {
 			cli.argv['pp-uuid'] = argv[idx + 1];
 		}
 	}
 	if (!cli.argv['developer-name']) {
 		const argv = process.argv;
-		const idx = argv.indexOf('-R') !== -1 ? argv.indexOf('-R') : argv.indexOf('--developer-name');
+		const idx =
+			argv.indexOf('-R') !== -1
+				? argv.indexOf('-R')
+				: argv.indexOf('--developer-name');
 		if (idx !== -1 && argv[idx + 1]) {
 			cli.argv['developer-name'] = argv[idx + 1];
 		}
@@ -231,15 +243,22 @@ export const run = async (
 				});
 			});
 		};
-		const skipLaunch = cli.argv['skip-launch'];
+		const skipLaunch = cli.argv['build-only'];
 		if (force) {
 			logger.info(`${chalk.green('[LiveView]')} Forcing app rebuild ...`);
 			// Clean the platform's Xcode/Gradle derived data so stale artifacts
 			// from a previous build (e.g. simulator → device switch) don't cause
 			// link failures. Only wipe the compiler output, not the whole build dir.
-			const platformBuildDir = path.join(projectDir, 'build', legacyPlatformName, 'build');
+			const platformBuildDir = path.join(
+				projectDir,
+				'build',
+				legacyPlatformName,
+				'build'
+			);
 			if (fs.existsSync(platformBuildDir)) {
-				logger.info(`${chalk.green('[LiveView]')} Cleaning stale build artifacts ...`);
+				logger.info(
+					`${chalk.green('[LiveView]')} Cleaning stale build artifacts ...`
+				);
 				await fs.remove(platformBuildDir);
 			}
 			cli.argv.liveview = true;
