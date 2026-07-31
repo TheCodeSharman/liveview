@@ -9,9 +9,11 @@ const querystring_1 = __importDefault(require("querystring"));
 const fs_extra_1 = __importDefault(require("fs-extra"));
 const pluginutils_1 = require("@rollup/pluginutils");
 const vite_js_1 = require("../../utils/vite.js");
-const controllerRE = /(?:[/\\]widgets[/\\]([^/\\]+))?[/\\](?:controllers)[/\\](.*)/;
 const EMPTY_EXPORT = 'export default {}';
 const VIEW_ONLY_PREFIX = '\0alloyview:';
+function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 function parseAlloyRequest(id) {
     const [filename, rawQuery] = id.split('?', 2);
     const query = querystring_1.default.parse(rawQuery);
@@ -28,6 +30,16 @@ function componentPlugin(ctx) {
     const { appDir } = ctx;
     let server;
     let config;
+    // Match canonical Alloy Controller requests only: the virtual `/alloy/
+    // controllers/*` request (app controllers, which are never aliased) or an
+    // absolute path under `<appDir>` — `<appDir>/controllers/*` and
+    // `<appDir>/widgets/<name>/controllers/*` (widget controllers arrive
+    // absolute via the `/alloy/widgets` alias). Anchoring to `/alloy` or
+    // `appDir` prevents incidental `.../controllers/...` segments (e.g.
+    // `app/lib/mvvm/controllers/*`) from being redirected to the Alloy shell in
+    // resolveId or run through the Alloy component compiler in transform —
+    // those are plain libs, not Alloy components.
+    const controllerRE = new RegExp(`^(?:${escapeRegExp(appDir)}|[/\\\\]?alloy)(?:[/\\\\]widgets[/\\\\]([^/\\\\]+))?[/\\\\]controllers[/\\\\](.*)$`);
     const filter = (0, pluginutils_1.createFilter)(controllerRE, /controllers\/BaseController/);
     return {
         name: 'titanium:alloy:component',

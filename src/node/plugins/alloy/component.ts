@@ -8,10 +8,12 @@ import { ModuleNode, Plugin, ResolvedConfig, ViteDevServer } from 'vite';
 import { cleanUrl, stripBase } from '../../utils/vite.js';
 import { AlloyContext } from './context';
 
-const controllerRE =
-	/(?:[/\\]widgets[/\\]([^/\\]+))?[/\\](?:controllers)[/\\](.*)/;
 const EMPTY_EXPORT = 'export default {}';
 const VIEW_ONLY_PREFIX = '\0alloyview:';
+
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface AlloyQuery {
 	alloy?: boolean;
@@ -35,6 +37,20 @@ export function componentPlugin(ctx: AlloyContext): Plugin {
 	const { appDir } = ctx;
 	let server: ViteDevServer;
 	let config: ResolvedConfig;
+	// Match canonical Alloy Controller requests only: the virtual `/alloy/
+	// controllers/*` request (app controllers, which are never aliased) or an
+	// absolute path under `<appDir>` — `<appDir>/controllers/*` and
+	// `<appDir>/widgets/<name>/controllers/*` (widget controllers arrive
+	// absolute via the `/alloy/widgets` alias). Anchoring to `/alloy` or
+	// `appDir` prevents incidental `.../controllers/...` segments (e.g.
+	// `app/lib/mvvm/controllers/*`) from being redirected to the Alloy shell in
+	// resolveId or run through the Alloy component compiler in transform —
+	// those are plain libs, not Alloy components.
+	const controllerRE = new RegExp(
+		`^(?:${escapeRegExp(
+			appDir
+		)}|[/\\\\]?alloy)(?:[/\\\\]widgets[/\\\\]([^/\\\\]+))?[/\\\\]controllers[/\\\\](.*)$`
+	);
 	const filter = createFilter(controllerRE, /controllers\/BaseController/);
 
 	return {
