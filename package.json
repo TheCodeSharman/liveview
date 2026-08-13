@@ -126,6 +126,7 @@
 	},
 	"files": [
 		"dist",
+		"hook",
 		"scripts"
 	],
 	"publishConfig": {

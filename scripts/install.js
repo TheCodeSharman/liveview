@@ -49,7 +49,10 @@ async function install() {
 			'Automatically integrating LiveView v2 with Titanium CLI ...'
 		)}\n`
 	);
-	await addPath('hooks');
+	// Titanium SDK 13.4.0+ loads our build hook natively via its bundled
+	// `cli/hooks/liveview.js` shim (`export * from 'liveview/hook/lvhook.js'`),
+	// so registering it again through paths.hooks would double-register the
+	// `--liveview` flag. Only the `serve` command still needs wiring.
 	await addPath('commands');
 }
 
