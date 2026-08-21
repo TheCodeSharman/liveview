@@ -6,7 +6,7 @@
 	"types": "./dist/node/index.d.ts",
 	"license": "Apache-2.0",
 	"scripts": {
-		"build": "npm-run-all clean -p build:* && npm run copy:native",
+		"build": "patch-package && npm-run-all clean -p build:* && npm run copy:native",
 		"copy:native": "node -e \"var fs=require('fs');fs.mkdirSync('dist/node/native',{recursive:true});fs.cpSync('src/node/native','dist/node/native',{recursive:true})\"",
 		"build:bundle": "rollup -c rollup.config.ts --configPlugin typescript",
 		"build:tsc": "tsc -p tsconfig.build.json",
@@ -96,6 +96,7 @@
 		"husky": "^4.3.0",
 		"lint-staged": "^10.4.2",
 		"npm-run-all": "^4.1.5",
+		"patch-package": "^8.0.1",
 		"prettier": "^2.3.0",
 		"rollup": "^4.5.0",
 		"tiws": "^1.0.1",
