@@ -1,6 +1,7 @@
 node_modules
 .DS_Store
-dist/
+# dist/ — checked in on deployment branches so npm install from GitHub works
+# without needing to run the build step (which requires dev dependencies).
 .vscode/
 *.log
 *.tgz

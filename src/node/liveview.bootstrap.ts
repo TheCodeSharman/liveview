@@ -133,13 +133,14 @@ function patchRequire() {
 
 		if (filename && !exclude(filename, request)) {
 			const id = cleanUrl(filename);
-			// First check the cache if this was alrady loaded
+			// First check the cache if this was already loaded
 			if (Module.cache[id]) {
 				return Module.cache[id].exports;
 			}
 
 			// Fetch from remote dev server
 			const source = fetchRemote(filename);
+
 			if (source) {
 				const module = new Module(filename, this);
 				let wrapped = source;

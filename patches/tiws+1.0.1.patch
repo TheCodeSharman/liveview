@@ -1,0 +1,18 @@
+diff --git a/node_modules/tiws/src/websocket.js b/node_modules/tiws/src/websocket.js
+index f52602e..b725833 100644
+--- a/node_modules/tiws/src/websocket.js
++++ b/node_modules/tiws/src/websocket.js
+@@ -412,8 +412,11 @@ class WebSocket extends EventEmiter {
+       payloadDataLength = buffer[2] << 8 | buffer[3] & 0xffff;
+       payloadDataOffset += 2;
+     } else if (payloadLength === 127) {
+-      // @todo: handle extended payload length of 64 bit unsinged int
+-      throw new Error('unsupported payload length of 64 bit unsinged int');
++      // 64-bit extended payload length (RFC 6455 5.2). JS numbers can't hold a
++      // full uint64, but a WebSocket payload never approaches 2^53 and the
++      // sender writes the high word as 0, so combine the two big-endian halves.
++      payloadDataLength = buffer.readUInt32BE(2) * 0x100000000 + buffer.readUInt32BE(6);
++      payloadDataOffset += 8;
+     }
+     let framePayloadDataLength = payloadDataLength;
+     if (framePayloadDataLength > bufferLength) {

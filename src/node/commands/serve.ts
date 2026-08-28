@@ -30,6 +30,22 @@ let buildCommand: any;
 
 export const config = (logger: any, config: any, cli: any) => {
 	const platform = cli.argv._[1];
+	// Register before buildCommand.config() so this fires before the Android builder's
+	// cli:pre-validate handler reads cli.argv['build-only']. When --build-only is set
+	// for Android, force build-only so the SDK skips device enumeration during validation
+	// (platform-specific options like -C/device-id are not registered for 'serve').
+	cli.on(
+		'cli:pre-validate',
+		(obj: any, callback: (err: null, obj: any) => void) => {
+			if (
+				process.argv.includes('--build-only') &&
+				cli.argv.platform === 'android'
+			) {
+				cli.argv['build-only'] = true;
+			}
+			callback(null, obj);
+		}
+	);
 	buildCommand = require(path.join(
 		cli.sdk.path,
 		'cli',
@@ -103,7 +119,6 @@ export const config = (logger: any, config: any, cli: any) => {
 			});
 
 			// Remove unsupported flags
-			delete mergedConfig.flags['build-only'];
 			delete mergedConfig.flags.legacy;
 
 			done(mergedConfig);
@@ -112,6 +127,51 @@ export const config = (logger: any, config: any, cli: any) => {
 };
 
 export const validate = (logger: any, config: any, cli: any) => {
+	// The titanium CLI's initBuildPlatform() only runs for the 'build' command,
+	// so platform-specific options like --target and -C/--device-id are not registered
+	// for 'serve'. Default/propagate them here so the platform builders behave correctly.
+	// Propagate --target from process.argv since it isn't registered for 'serve'.
+	if (!cli.argv.target) {
+		const targetIdx = process.argv.indexOf('--target');
+		cli.argv.target =
+			targetIdx !== -1 && process.argv[targetIdx + 1]
+				? process.argv[targetIdx + 1]
+				: cli.argv.platform === 'android'
+				? 'emulator'
+				: 'simulator';
+	}
+	// Propagate -C / --device-id from process.argv since it isn't registered for 'serve'.
+	if (!cli.argv['device-id']) {
+		const argv = process.argv;
+		const idx =
+			argv.indexOf('-C') !== -1
+				? argv.indexOf('-C')
+				: argv.indexOf('--device-id');
+		if (idx !== -1 && argv[idx + 1]) {
+			cli.argv['device-id'] = argv[idx + 1];
+		}
+	}
+	// Propagate -P / --pp-uuid and -R / --developer-name from process.argv.
+	if (!cli.argv['pp-uuid']) {
+		const argv = process.argv;
+		const idx =
+			argv.indexOf('-P') !== -1
+				? argv.indexOf('-P')
+				: argv.indexOf('--pp-uuid');
+		if (idx !== -1 && argv[idx + 1]) {
+			cli.argv['pp-uuid'] = argv[idx + 1];
+		}
+	}
+	if (!cli.argv['developer-name']) {
+		const argv = process.argv;
+		const idx =
+			argv.indexOf('-R') !== -1
+				? argv.indexOf('-R')
+				: argv.indexOf('--developer-name');
+		if (idx !== -1 && argv[idx + 1]) {
+			cli.argv['developer-name'] = argv[idx + 1];
+		}
+	}
 	return buildCommand.validate(logger, config, cli);
 };
 
@@ -151,6 +211,9 @@ export const run = async (
 			},
 			env: {
 				DEBUG: process.env.DEBUG
+			},
+			flags: {
+				unitTest: cli.argv['unit-test'] || process.argv.includes('--unit-test')
 			}
 		});
 		const data: LiveViewMetadata = {
@@ -170,11 +233,48 @@ export const run = async (
 		}
 
 		const runBuild = promisify<RunFn>(buildCommand.run);
+		const runHook = (builder: any, name: string) => {
+			return new Promise<void>((resolve, reject) => {
+				cli.emit(name, builder, (e: Error) => {
+					if (e) {
+						return reject(e);
+					}
+					resolve();
+				});
+			});
+		};
+		const skipLaunch = cli.argv['build-only'];
 		if (force) {
 			logger.info(`${chalk.green('[LiveView]')} Forcing app rebuild ...`);
+			// Clean the platform's Xcode/Gradle derived data so stale artifacts
+			// from a previous build (e.g. simulator → device switch) don't cause
+			// link failures. Only wipe the compiler output, not the whole build dir.
+			const platformBuildDir = path.join(
+				projectDir,
+				'build',
+				legacyPlatformName,
+				'build'
+			);
+			if (fs.existsSync(platformBuildDir)) {
+				logger.info(
+					`${chalk.green('[LiveView]')} Cleaning stale build artifacts ...`
+				);
+				await fs.remove(platformBuildDir);
+			}
 			cli.argv.liveview = true;
 			await runBuild(logger, config, cli);
 			await fs.outputJSON(dataPath, data);
+			if (!skipLaunch) {
+				// After a force build, the SDK install/launch hooks weren't registered
+				// (initBuildPlatform only runs for 'build' command). Reset hooks and
+				// launch the app the same way the non-force path does.
+				await resetCliHooks(cli, legacyPlatformName);
+				const builder = await getBuilderInstance(logger, config, cli, runBuild);
+				if (platform === 'android') {
+					await runHook(builder, 'build.pre.compile');
+				}
+				await runHook(builder, 'build.post.compile');
+			}
 		} else {
 			logger.info(`${chalk.green('[LiveView]')} Starting dev server ...`);
 			await startServer({
@@ -190,26 +290,19 @@ export const run = async (
 					force
 				}
 			});
-			resetCliHooks(cli, legacyPlatformName);
-			const builder = await getBuilderInstance(logger, config, cli, runBuild);
-			const runHook = (name: string) => {
-				return new Promise<void>((resolve, reject) => {
-					cli.emit(name, builder, (e: Error) => {
-						if (e) {
-							return reject(e);
-						}
-						resolve();
-					});
-				});
-			};
-			if (platform === 'android') {
-				// emit fake pre-compile hook to prepare Android emulators or device
-				// for app launch
-				await runHook('build.pre.compile');
+			if (!skipLaunch) {
+				await resetCliHooks(cli, legacyPlatformName);
+				const builder = await getBuilderInstance(logger, config, cli, runBuild);
+				if (platform === 'android') {
+					// emit fake pre-compile hook to prepare Android emulators or device
+					// for app launch
+					await runHook(builder, 'build.pre.compile');
+				}
+				// emit fake post-compile hook to run previously built app.
+				await runHook(builder, 'build.post.compile');
 			}
-			// emit fake post-compile hook to run previously built app.
-			await runHook('build.post.compile');
 		}
+		logger.info(`${chalk.green('[LiveView]')} Server ready`);
 	} catch (e) {
 		console.error(e);
 		return finished(e);
@@ -312,7 +405,7 @@ function stubMethods(target: any, methods: string[]): () => void {
  *
  * @param cli Titanium CLI instance
  */
-function resetCliHooks(cli: any, platform: string) {
+async function resetCliHooks(cli: any, platform: string) {
 	cli.hooks = {
 		scannedPaths: {},
 		pre: {},
@@ -324,5 +417,5 @@ function resetCliHooks(cli: any, platform: string) {
 		errors: {}
 	};
 
-	cli.scanHooks(path.join(cli.sdk.path, platform, 'cli/hooks'));
+	await cli.scanHooks(path.join(cli.sdk.path, platform, 'cli/hooks'));
 }

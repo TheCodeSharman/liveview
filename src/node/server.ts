@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { ViteDevServer } from 'vite';
 import { createServer, normalizePath } from 'vite';
 
@@ -34,9 +34,24 @@ export async function startServer({
 	const isAlloy = projectType === 'alloy';
 	const root = path.join(projectDir, isAlloy ? 'app' : 'Resources');
 	const appEntry = isAlloy ? 'alloy.js' : 'app.js';
-	const nativeModules = [
-		...new Set<string>(tiapp.modules.map((m: any) => m.id))
-	];
+	// Read native module IDs directly from tiapp.xml rather than tiapp.modules,
+	// which may have been filtered by build hooks (e.g. stripsimincompatiblemodules
+	// removes simulator-incompatible modules before Vite starts). Vite needs to
+	// know about ALL native modules so it can mark them as external.
+	let nativeModules: string[];
+	try {
+		const tiappXmlPath = path.join(projectDir, 'tiapp.xml');
+		const tiappXmlContent = readFileSync(tiappXmlPath, 'utf-8');
+		const modulePattern = /<module[^>]*>([^<]+)<\/module>/g;
+		const moduleSet = new Set<string>();
+		let match;
+		while ((match = modulePattern.exec(tiappXmlContent)) !== null) {
+			moduleSet.add(match[1].trim());
+		}
+		nativeModules = [...moduleSet];
+	} catch (e) {
+		nativeModules = [...new Set<string>(tiapp.modules.map((m: any) => m.id))];
+	}
 	const define: Record<string, string> = {
 		OS_ANDROID: JSON.stringify(platform === 'android'),
 		OS_IOS: JSON.stringify(platform === 'ios')
@@ -75,7 +90,15 @@ export async function startServer({
 		optimizeDeps: {
 			exclude: [...nativeModules],
 			esbuildOptions: {
-				define
+				define,
+				plugins: nativeModules.length > 0 ? [{
+					name: 'titanium:native-modules',
+					setup(build: any) {
+						const escaped = nativeModules.map((m: string) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+						const filter = new RegExp(`^(${escaped.join('|')})$`);
+						build.onResolve({ filter }, (args: any) => ({ path: args.path, external: true }));
+					}
+				}] : []
 			}
 		},
 		server: {
